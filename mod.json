@@ -7,12 +7,6 @@
   "abi": 1,
   "imports": [
     {
-      "service_id": "dev.twilitrealm.dusklight.config",
-      "major": 2,
-      "min_minor": 0,
-      "optional": false
-    },
-    {
       "service_id": "dev.twilitrealm.dusklight.game",
       "major": 2,
       "min_minor": 0,
@@ -28,12 +22,6 @@
       "service_id": "dev.twilitrealm.dusklight.log",
       "major": 1,
       "min_minor": 0,
-      "optional": false
-    },
-    {
-      "service_id": "dev.twilitrealm.dusklight.ui",
-      "major": 1,
-      "min_minor": 2,
       "optional": false
     }
   ],

@@ -1,23 +1,21 @@
 #include "mods/hook.hpp"
 #include "mods/service.hpp"
-#include "mods/svc/config.h"
 #include "mods/svc/hook.h"
 #include "mods/svc/log.h"
-#include "mods/svc/ui.h"
 
 #include <vector>
 
 #include "d/actor/d_a_alink.h"
 #include "d/d_camera.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_meter2.h"
+#include "d/d_meter2_draw.h"
 #include "d/d_item_data.h"
 
 DEFINE_MOD();
 
 IMPORT_SERVICE(LogService, svc_log);
 IMPORT_SERVICE(HookService, svc_hook);
-IMPORT_SERVICE(ConfigService, svc_config);
-IMPORT_SERVICE(UiService, svc_ui);
 
 DEFINE_HOOK(&daAlink_c::checkAcceptUseItemInWater, CheckAcceptUseItemInWater);
 DEFINE_HOOK(&daAlink_c::checkCastleTownUseItem, CheckCastleTownUseItem);
@@ -35,19 +33,12 @@ DEFINE_HOOK(&daAlink_c::procGrassWhistleWait, ProcGrassWhistleWait);
 DEFINE_HOOK(&daAlink_c::setLight, SetLight);
 DEFINE_HOOK(&dCamera_c::ChangeModeOK, ChangeModeOK);
 DEFINE_HOOK(&dCamera_c::updatePad, UpdatePad);
+DEFINE_HOOK(&dMeter2_c::alphaAnimeKantera, AlphaAnimeKantera);
 
 namespace {
 
-ConfigVarHandle g_cvar_enabled = 0;
-
 bool unrestricted_items_enabled() {
-    bool enabled = false;
-    if (g_cvar_enabled != 0 &&
-        svc_config->get_bool(mod_ctx, g_cvar_enabled, &enabled) == MOD_OK)
-    {
-        return enabled;
-    }
-    return false;
+    return true;
 }
 
 enum daAlink_ItemProc {
@@ -79,7 +70,9 @@ bool unrestricted_items_camera_stage() {
 }
 
 bool lantern_ignores_water(const daAlink_c* player) {
-    return unrestricted_items_water_active(player);
+    return unrestricted_items_enabled() &&
+           (player->checkNoResetFlg0(daAlink_c::FLG0_WATER_IN_MOVE) ||
+            player->checkModeFlg(0x40000));
 }
 
 bool water_in_kandelaar_offset(const daAlink_c* player, f32 water_y) {
@@ -302,6 +295,7 @@ std::vector<daAlink_c*> g_set_light_restore_stack;
 struct SavedOilCount {
     daAlink_c* player;
     s32 oil_count;
+    s32 item_now_oil;
 };
 std::vector<SavedOilCount> g_init_kandelaar_swing_oil_stack;
 
@@ -324,6 +318,18 @@ void on_set_light_post(ModContext*, void* args, void*, void*) {
         player->offNoResetFlg2(daAlink_c::FLG2_KANDELAAR_LIGHT_OFF);
         g_set_light_restore_stack.pop_back();
     }
+}
+
+void replace_alpha_anime_kantera(ModContext*, void* args, void*, void*) {
+    auto* meter = mods::arg<dMeter2_c*>(args, 0);
+    auto* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
+    if (player != nullptr && lantern_in_water(player)) {
+        meter->getMeterDrawPtr()->setAlphaKanteraAnimeMin();
+        meter->getMeterDrawPtr()->setAlphaKanteraChange(true);
+        return;
+    }
+
+    AlphaAnimeKantera::g_orig(meter);
 }
 
 void replace_check_accept_use_item_in_water(ModContext*, void* args, void* retval, void*) {
@@ -495,7 +501,8 @@ HookAction on_init_kandelaar_swing_pre(ModContext*, void* args, void*, void*) {
         lantern_in_water(player) &&
         !player->checkEventRun())
     {
-        g_init_kandelaar_swing_oil_stack.push_back({player, dComIfGs_getOil()});
+        g_init_kandelaar_swing_oil_stack.push_back(
+            {player, dComIfGs_getOil(), dComIfGp_getItemNowOil()});
     }
     return HOOK_CONTINUE;
 }
@@ -506,11 +513,13 @@ void on_init_kandelaar_swing_post(ModContext*, void* args, void*, void*) {
         g_init_kandelaar_swing_oil_stack.back().player == player)
     {
         const s32 saved_oil = g_init_kandelaar_swing_oil_stack.back().oil_count;
+        const s32 saved_item_now_oil = g_init_kandelaar_swing_oil_stack.back().item_now_oil;
         g_init_kandelaar_swing_oil_stack.pop_back();
         const s32 oil_delta = saved_oil - dComIfGs_getOil();
         if (oil_delta > 0) {
             dComIfGp_setItemOilCount(oil_delta);
         }
+        dComIfGp_setItemNowOil(saved_item_now_oil);
     }
 }
 
@@ -521,39 +530,11 @@ ModResult install_hook(ModResult result, const char* name) {
     return result;
 }
 
-ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
-    UiControlDesc control = UI_CONTROL_DESC_INIT;
-    control.kind = UI_CONTROL_TOGGLE;
-    control.label = "Enabled";
-    control.binding = UI_BINDING_CONFIG_VAR;
-    control.config_var = g_cvar_enabled;
-    return svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
-}
-
 }  // namespace
 
 extern "C" {
 MOD_EXPORT ModResult mod_initialize(ModError*) {
     ModResult result = MOD_OK;
-
-    ConfigVarDesc enabled_desc = CONFIG_VAR_DESC_INIT;
-    enabled_desc.name = "unrestrictedItemsEnabled";
-    enabled_desc.type = CONFIG_VAR_BOOL;
-    enabled_desc.default_bool = false;
-
-    result = svc_config->register_var(mod_ctx, &enabled_desc, &g_cvar_enabled);
-    if (result != MOD_OK) {
-        svc_log->error(mod_ctx, "failed to register unrestricted-items cvar");
-        return result;
-    }
-
-    UiModsPanelDesc panel_desc = UI_MODS_PANEL_DESC_INIT;
-    panel_desc.build = build_panel;
-    result = svc_ui->register_mods_panel(mod_ctx, &panel_desc);
-    if (result != MOD_OK) {
-        svc_log->error(mod_ctx, "failed to register unrestricted-items mod panel");
-        return result;
-    }
 
     result = install_hook(
         mods::hook_replace<CheckAcceptUseItemInWater>(
@@ -671,6 +652,13 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
     result = install_hook(
         mods::hook_add_post<SetLight>(svc_hook, on_set_light_post),
         "failed to install SetLight post-hook");
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    result = install_hook(
+        mods::hook_replace<AlphaAnimeKantera>(svc_hook, replace_alpha_anime_kantera),
+        "failed to install AlphaAnimeKantera");
     if (result != MOD_OK) {
         return result;
     }
