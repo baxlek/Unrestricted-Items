@@ -572,7 +572,7 @@ ModResult install_hook(ModResult result, const char* name) {
 ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     UiControlDesc control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_TOGGLE;
-    control.label = "Enable first-person in Castle Town and Malo Mart";
+    control.label = "Enable FPV in Castle Town";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_cvar_stage_first_person;
     return svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
