@@ -250,6 +250,10 @@ bool stage_hookshot_native_camera_proc(const daAlink_c* player) {
     }
 }
 
+bool valid_camera_type(const dCamera_c* camera, int type) {
+    return type >= 0 && type < camera->mCamTypeNum;
+}
+
 int resolve_camera_style_index(const dCamera_c* camera, int type_a, int type_b) {
     return camera->mCamTypeData[type_a].field_0x18[camera->mIsWolf][0] >= 0 &&
                    camera->mCamTypeData[type_b].field_0x18[camera->mIsWolf][0] >= 0
@@ -257,8 +261,8 @@ int resolve_camera_style_index(const dCamera_c* camera, int type_a, int type_b) 
                : 0;
 }
 
-void patch_camera_mode_style(dCamera_c* camera, int type, int field_type, int mode) {
-    if (type < 0 || field_type < 0 || !stage_first_person_camera_mode(mode)) {
+void patch_camera_style_mode(dCamera_c* camera, int type, int field_type, int mode) {
+    if (!valid_camera_type(camera, type) || !valid_camera_type(camera, field_type)) {
         return;
     }
 
@@ -271,6 +275,14 @@ void patch_camera_mode_style(dCamera_c* camera, int type, int field_type, int mo
 
     g_camera_run_style_stack.push_back({camera, type, fallback_index, mode, current_style});
     camera->mCamTypeData[type].field_0x18[fallback_index][mode] = fallback_style;
+}
+
+void patch_camera_mode_style(dCamera_c* camera, int type, int field_type, int mode) {
+    if (!stage_first_person_camera_mode(mode)) {
+        return;
+    }
+
+    patch_camera_style_mode(camera, type, field_type, mode);
 }
 
 HookAction on_camera_run_pre(ModContext*, void* args, void*, void*) {
@@ -294,6 +306,15 @@ HookAction on_camera_run_pre(ModContext*, void* args, void*, void*) {
     const int hook_actor_type = camera->GetCameraTypeFromCameraName("HookActor");
     if (field_type < 0) {
         return HOOK_CONTINUE;
+    }
+
+    if (player != nullptr && player->mProcID == daAlink_c::PROC_HOOKSHOT_FLY) {
+        patch_camera_style_mode(camera, camera->mCurType, field_type, 9);
+        patch_camera_style_mode(camera, camera->mMapToolType, field_type, 9);
+        if (camera->mRoomMapTool.mCameraIndex != 0xff) {
+            const int room_map_type = camera->GetCameraTypeFromToolData(&camera->mRoomMapTool.mCamData);
+            patch_camera_style_mode(camera, room_map_type, field_type, 9);
+        }
     }
 
     if (camera->mCurType == scope_type || camera->mCurType == hook_wall_type ||
