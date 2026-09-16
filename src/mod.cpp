@@ -236,6 +236,20 @@ bool stage_first_person_camera_mode(s32 mode) {
     return mode == 4 || mode == 7 || mode == 8;
 }
 
+bool stage_hookshot_native_camera_proc(const daAlink_c* player) {
+    switch (player->mProcID) {
+    case daAlink_c::PROC_HOOKSHOT_ROOF_WAIT:
+    case daAlink_c::PROC_HOOKSHOT_ROOF_SHOOT:
+    case daAlink_c::PROC_HOOKSHOT_ROOF_BOOTS:
+    case daAlink_c::PROC_HOOKSHOT_WALL_WAIT:
+    case daAlink_c::PROC_HOOKSHOT_WALL_SHOOT:
+    case daAlink_c::PROC_HOOKSHOT_FLY:
+        return true;
+    default:
+        return false;
+    }
+}
+
 int resolve_camera_style_index(const dCamera_c* camera, int type_a, int type_b) {
     return camera->mCamTypeData[type_a].field_0x18[camera->mIsWolf][0] >= 0 &&
                    camera->mCamTypeData[type_b].field_0x18[camera->mIsWolf][0] >= 0
@@ -266,7 +280,7 @@ HookAction on_camera_run_pre(ModContext*, void* args, void*, void*) {
     }
 
     auto* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
-    if (player != nullptr && player->mProcID == daAlink_c::PROC_HOOKSHOT_FLY &&
+    if (player != nullptr && stage_hookshot_native_camera_proc(player) &&
         (camera->mTagCamTool.mFlags & 0x10) == 0)
     {
         g_camera_run_tag_flag_stack.push_back({camera, camera->mTagCamTool.mFlags});
