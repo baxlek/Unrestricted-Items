@@ -36,7 +36,7 @@ DEFINE_HOOK(&daAlink_c::checkNotHeavyBootsStage, CheckNotHeavyBootsStage);
 DEFINE_HOOK(&daAlink_c::procGrassWhistleWait, ProcGrassWhistleWait);
 DEFINE_HOOK(&daAlink_c::setLight, SetLight);
 DEFINE_HOOK(&dCamera_c::ChangeModeOK, ChangeModeOK);
-DEFINE_HOOK(&dCamera_c::updatePad, UpdatePad);
+DEFINE_HOOK(&dCamera_c::Run, CameraRun);
 DEFINE_HOOK(&dMeter2_c::alphaAnimeKantera, AlphaAnimeKantera);
 
 namespace {
@@ -220,12 +220,13 @@ int unrestricted_items_fallback_new_item_change(daAlink_c* player, u8 selected_s
 
 struct SavedCameraModeStyle {
     dCamera_c* camera;
+    int type;
     int fallback_index;
     s16 original_style;
 };
-std::vector<SavedCameraModeStyle> g_update_pad_style_stack;
+std::vector<SavedCameraModeStyle> g_camera_run_style_stack;
 
-HookAction on_update_pad_pre(ModContext*, void* args, void*, void*) {
+HookAction on_camera_run_pre(ModContext*, void* args, void*, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
     if (!stage_first_person_enabled() || !unrestricted_items_camera_stage()) {
         return HOOK_CONTINUE;
@@ -244,22 +245,22 @@ HookAction on_update_pad_pre(ModContext*, void* args, void*, void*) {
         camera->mCamTypeData[camera->mCurType].field_0x18[fallback_index][4];
     const s16 fallback_style =
         camera->mCamTypeData[field_type].field_0x18[fallback_index][4];
-    if (fallback_style >= 0 && current_style != fallback_style) {
-        g_update_pad_style_stack.push_back({camera, fallback_index, current_style});
+    if (current_style < 0 && fallback_style >= 0) {
+        g_camera_run_style_stack.push_back({camera, camera->mCurType, fallback_index, current_style});
         camera->mCamTypeData[camera->mCurType].field_0x18[fallback_index][4] = fallback_style;
     }
 
     return HOOK_CONTINUE;
 }
 
-void on_update_pad_post(ModContext*, void* args, void*, void*) {
+void on_camera_run_post(ModContext*, void* args, void*, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
-    if (!g_update_pad_style_stack.empty() &&
-        g_update_pad_style_stack.back().camera == camera)
+    if (!g_camera_run_style_stack.empty() &&
+        g_camera_run_style_stack.back().camera == camera)
     {
-        const SavedCameraModeStyle saved = g_update_pad_style_stack.back();
-        g_update_pad_style_stack.pop_back();
-        camera->mCamTypeData[camera->mCurType].field_0x18[saved.fallback_index][4] =
+        const SavedCameraModeStyle saved = g_camera_run_style_stack.back();
+        g_camera_run_style_stack.pop_back();
+        camera->mCamTypeData[saved.type].field_0x18[saved.fallback_index][4] =
             saved.original_style;
     }
 }
@@ -717,15 +718,15 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
     }
 
     result = install_hook(
-        mods::hook_add_post<UpdatePad>(svc_hook, on_update_pad_post),
-        "failed to install UpdatePad post-hook");
+        mods::hook_add_post<CameraRun>(svc_hook, on_camera_run_post),
+        "failed to install CameraRun post-hook");
     if (result != MOD_OK) {
         return result;
     }
 
     result = install_hook(
-        mods::hook_add_pre<UpdatePad>(svc_hook, on_update_pad_pre),
-        "failed to install UpdatePad pre-hook");
+        mods::hook_add_pre<CameraRun>(svc_hook, on_camera_run_pre),
+        "failed to install CameraRun pre-hook");
     if (result != MOD_OK) {
         return result;
     }
