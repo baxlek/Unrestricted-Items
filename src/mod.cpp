@@ -222,9 +222,37 @@ struct SavedCameraModeStyle {
     dCamera_c* camera;
     int type;
     int fallback_index;
+    int mode;
     s16 original_style;
 };
 std::vector<SavedCameraModeStyle> g_camera_run_style_stack;
+
+bool stage_first_person_camera_mode(s32 mode) {
+    return mode == 4 || mode == 7 || mode == 8;
+}
+
+int resolve_camera_style_index(const dCamera_c* camera, int type_a, int type_b) {
+    return camera->mCamTypeData[type_a].field_0x18[camera->mIsWolf][0] >= 0 &&
+                   camera->mCamTypeData[type_b].field_0x18[camera->mIsWolf][0] >= 0
+               ? camera->mIsWolf
+               : 0;
+}
+
+void patch_camera_mode_style(dCamera_c* camera, int type, int field_type, int mode) {
+    if (type < 0 || field_type < 0 || !stage_first_person_camera_mode(mode)) {
+        return;
+    }
+
+    const int fallback_index = resolve_camera_style_index(camera, type, field_type);
+    const s16 current_style = camera->mCamTypeData[type].field_0x18[fallback_index][mode];
+    const s16 fallback_style = camera->mCamTypeData[field_type].field_0x18[fallback_index][mode];
+    if (fallback_style < 0 || current_style == fallback_style) {
+        return;
+    }
+
+    g_camera_run_style_stack.push_back({camera, type, fallback_index, mode, current_style});
+    camera->mCamTypeData[type].field_0x18[fallback_index][mode] = fallback_style;
+}
 
 HookAction on_camera_run_pre(ModContext*, void* args, void*, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
@@ -237,17 +265,22 @@ HookAction on_camera_run_pre(ModContext*, void* args, void*, void*) {
         return HOOK_CONTINUE;
     }
 
-    const int fallback_index =
-        camera->mCamTypeData[camera->mCurType].field_0x18[camera->mIsWolf][0] > 0
-            ? camera->mIsWolf
-            : 0;
-    const s16 current_style =
-        camera->mCamTypeData[camera->mCurType].field_0x18[fallback_index][4];
-    const s16 fallback_style =
-        camera->mCamTypeData[field_type].field_0x18[fallback_index][4];
-    if (fallback_style >= 0 && current_style != fallback_style) {
-        g_camera_run_style_stack.push_back({camera, camera->mCurType, fallback_index, current_style});
-        camera->mCamTypeData[camera->mCurType].field_0x18[fallback_index][4] = fallback_style;
+    static constexpr int k_stage_first_person_modes[] = {4, 7, 8};
+    for (const int mode : k_stage_first_person_modes) {
+        patch_camera_mode_style(camera, camera->mCurType, field_type, mode);
+    }
+
+    static constexpr const char* k_stage_first_person_camera_types[] = {
+        "Scope",
+        "HookWall",
+        "HookRoof",
+        "HookActor",
+    };
+    for (const char* camera_name : k_stage_first_person_camera_types) {
+        const int type = camera->GetCameraTypeFromCameraName(camera_name);
+        for (const int mode : k_stage_first_person_modes) {
+            patch_camera_mode_style(camera, type, field_type, mode);
+        }
     }
 
     return HOOK_CONTINUE;
@@ -255,12 +288,12 @@ HookAction on_camera_run_pre(ModContext*, void* args, void*, void*) {
 
 void on_camera_run_post(ModContext*, void* args, void*, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
-    if (!g_camera_run_style_stack.empty() &&
-        g_camera_run_style_stack.back().camera == camera)
+    while (!g_camera_run_style_stack.empty() &&
+           g_camera_run_style_stack.back().camera == camera)
     {
         const SavedCameraModeStyle saved = g_camera_run_style_stack.back();
         g_camera_run_style_stack.pop_back();
-        camera->mCamTypeData[saved.type].field_0x18[saved.fallback_index][4] =
+        camera->mCamTypeData[saved.type].field_0x18[saved.fallback_index][saved.mode] =
             saved.original_style;
     }
 }
@@ -497,13 +530,16 @@ void replace_change_mode_ok(ModContext*, void* args, void* retval, void*) {
     auto& result = *static_cast<bool*>(retval);
     result = ChangeModeOK::g_orig(camera, mode);
 
-    if (result || mode != 4 || !stage_first_person_enabled() || !unrestricted_items_camera_stage()) {
+    if (result || !stage_first_person_camera_mode(mode) || !stage_first_person_enabled() ||
+        !unrestricted_items_camera_stage())
+    {
         return;
     }
 
     const int field_type = camera->GetCameraTypeFromCameraName("FieldS");
     if (field_type >= 0 &&
-        camera->mCamTypeData[field_type].field_0x18[camera->mIsWolf][mode] >= 0)
+        camera->mCamTypeData[field_type]
+                .field_0x18[resolve_camera_style_index(camera, camera->mCurType, field_type)][mode] >= 0)
     {
         result = true;
     }
