@@ -445,22 +445,6 @@ void replace_set_start_proc_init(ModContext*, void* args, void* retval, void*) {
     auto* player = mods::arg<daAlink_c*>(args, 0);
     auto& result = *static_cast<int*>(retval);
     result = SetStartProcInit::g_orig(player);
-
-    if (!unrestricted_items_enabled() || player->checkWolf() ||
-        player->mEquipItem != dItemNo_NONE_e)
-    {
-        return;
-    }
-
-    u16 equip_item = (dComIfGs_getLastSceneMode() >> 24) & 0xFF;
-    if (equip_item == dItemNo_SWORD_e) {
-        equip_item = 0x103;
-    }
-
-    if (equip_item != dItemNo_NONE_e) {
-        player->mEquipItem = equip_item;
-        player->setItemModel();
-    }
 }
 
 void replace_check_item_action(ModContext*, void* args, void* retval, void*) {
