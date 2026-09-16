@@ -254,59 +254,30 @@ void patch_camera_mode_style(dCamera_c* camera, int type, int field_type, int mo
     camera->mCamTypeData[type].field_0x18[fallback_index][mode] = fallback_style;
 }
 
-void patch_camera_mode_style(dCamera_c* camera, int type, int field_type, int mode, int field_mode) {
-    if (type < 0 || field_type < 0 || !stage_first_person_camera_mode(mode) ||
-        !stage_first_person_camera_mode(field_mode))
-    {
-        return;
-    }
-
-    const int fallback_index = resolve_camera_style_index(camera, type, field_type);
-    const s16 current_style = camera->mCamTypeData[type].field_0x18[fallback_index][mode];
-    const s16 fallback_style = camera->mCamTypeData[field_type].field_0x18[fallback_index][field_mode];
-    if (fallback_style < 0 || current_style == fallback_style) {
-        return;
-    }
-
-    g_camera_run_style_stack.push_back({camera, type, fallback_index, mode, current_style});
-    camera->mCamTypeData[type].field_0x18[fallback_index][mode] = fallback_style;
-}
-
 HookAction on_camera_run_pre(ModContext*, void* args, void*, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
     if (!stage_first_person_enabled() || !unrestricted_items_camera_stage()) {
         return HOOK_CONTINUE;
     }
 
-    auto* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
-
     const int field_type = camera->GetCameraTypeFromCameraName("FieldS");
+    const int scope_type = camera->GetCameraTypeFromCameraName("Scope");
+    const int hook_wall_type = camera->GetCameraTypeFromCameraName("HookWall");
+    const int hook_roof_type = camera->GetCameraTypeFromCameraName("HookRoof");
+    const int hook_actor_type = camera->GetCameraTypeFromCameraName("HookActor");
     if (field_type < 0) {
+        return HOOK_CONTINUE;
+    }
+
+    if (camera->mCurType == scope_type || camera->mCurType == hook_wall_type ||
+        camera->mCurType == hook_roof_type || camera->mCurType == hook_actor_type)
+    {
         return HOOK_CONTINUE;
     }
 
     static constexpr int k_stage_first_person_modes[] = {4, 7, 8};
     for (const int mode : k_stage_first_person_modes) {
         patch_camera_mode_style(camera, camera->mCurType, field_type, mode);
-    }
-
-    const int scope_type = camera->GetCameraTypeFromCameraName("Scope");
-    for (const int mode : k_stage_first_person_modes) {
-        patch_camera_mode_style(camera, scope_type, field_type, mode, 4);
-    }
-
-    if (player != nullptr && player->checkHookshotWait()) {
-        static constexpr const char* k_hook_camera_types[] = {
-            "HookWall",
-            "HookRoof",
-            "HookActor",
-        };
-        for (const char* camera_name : k_hook_camera_types) {
-            const int type = camera->GetCameraTypeFromCameraName(camera_name);
-            for (const int mode : k_stage_first_person_modes) {
-                patch_camera_mode_style(camera, type, field_type, mode, 4);
-            }
-        }
     }
 
     return HOOK_CONTINUE;
