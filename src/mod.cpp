@@ -226,6 +226,11 @@ struct SavedCameraModeStyle {
     s16 original_style;
 };
 std::vector<SavedCameraModeStyle> g_camera_run_style_stack;
+struct SavedCameraTagFlags {
+    dCamera_c* camera;
+    u8 original_flags;
+};
+std::vector<SavedCameraTagFlags> g_camera_run_tag_flag_stack;
 
 bool stage_first_person_camera_mode(s32 mode) {
     return mode == 4 || mode == 7 || mode == 8;
@@ -260,6 +265,14 @@ HookAction on_camera_run_pre(ModContext*, void* args, void*, void*) {
         return HOOK_CONTINUE;
     }
 
+    auto* player = static_cast<daAlink_c*>(daPy_getPlayerActorClass());
+    if (player != nullptr && player->mProcID == daAlink_c::PROC_HOOKSHOT_FLY &&
+        (camera->mTagCamTool.mFlags & 0x10) == 0)
+    {
+        g_camera_run_tag_flag_stack.push_back({camera, camera->mTagCamTool.mFlags});
+        camera->mTagCamTool.mFlags |= 0x10;
+    }
+
     const int field_type = camera->GetCameraTypeFromCameraName("FieldS");
     const int scope_type = camera->GetCameraTypeFromCameraName("Scope");
     const int hook_wall_type = camera->GetCameraTypeFromCameraName("HookWall");
@@ -285,6 +298,14 @@ HookAction on_camera_run_pre(ModContext*, void* args, void*, void*) {
 
 void on_camera_run_post(ModContext*, void* args, void*, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
+    while (!g_camera_run_tag_flag_stack.empty() &&
+           g_camera_run_tag_flag_stack.back().camera == camera)
+    {
+        const SavedCameraTagFlags saved = g_camera_run_tag_flag_stack.back();
+        g_camera_run_tag_flag_stack.pop_back();
+        camera->mTagCamTool.mFlags = saved.original_flags;
+    }
+
     while (!g_camera_run_style_stack.empty() &&
            g_camera_run_style_stack.back().camera == camera)
     {
