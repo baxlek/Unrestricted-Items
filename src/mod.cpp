@@ -1,7 +1,9 @@
 #include "mods/hook.hpp"
 #include "mods/service.hpp"
+#include "mods/svc/config.h"
 #include "mods/svc/hook.h"
 #include "mods/svc/log.h"
+#include "mods/svc/ui.h"
 
 #include <vector>
 
@@ -16,6 +18,8 @@ DEFINE_MOD();
 
 IMPORT_SERVICE(LogService, svc_log);
 IMPORT_SERVICE(HookService, svc_hook);
+IMPORT_SERVICE(ConfigService, svc_config);
+IMPORT_SERVICE(UiService, svc_ui);
 
 DEFINE_HOOK(&daAlink_c::checkAcceptUseItemInWater, CheckAcceptUseItemInWater);
 DEFINE_HOOK(&daAlink_c::checkCastleTownUseItem, CheckCastleTownUseItem);
@@ -37,8 +41,16 @@ DEFINE_HOOK(&dMeter2_c::alphaAnimeKantera, AlphaAnimeKantera);
 
 namespace {
 
+ConfigVarHandle g_cvar_stage_first_person = 0;
+
 bool unrestricted_items_enabled() {
     return true;
+}
+
+bool stage_first_person_enabled() {
+    bool enabled = false;
+    return g_cvar_stage_first_person != 0 &&
+           svc_config->get_bool(mod_ctx, g_cvar_stage_first_person, &enabled) == MOD_OK && enabled;
 }
 
 enum daAlink_ItemProc {
@@ -215,7 +227,7 @@ std::vector<SavedCameraModeStyle> g_update_pad_style_stack;
 
 HookAction on_update_pad_pre(ModContext*, void* args, void*, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
-    if (!unrestricted_items_enabled() || !unrestricted_items_camera_stage()) {
+    if (!stage_first_person_enabled() || !unrestricted_items_camera_stage()) {
         return HOOK_CONTINUE;
     }
 
@@ -377,7 +389,7 @@ void replace_swim_delete_item(ModContext*, void* args, void*, void*) {
 void replace_check_no_subject_mode_camera(ModContext*, void* args, void* retval, void*) {
     auto* player = mods::arg<daAlink_c*>(args, 0);
     auto& result = *static_cast<bool*>(retval);
-    if (unrestricted_items_enabled() && unrestricted_items_camera_stage()) {
+    if (stage_first_person_enabled() && unrestricted_items_camera_stage()) {
         result = player->checkCargoCarry();
         return;
     }
@@ -484,7 +496,7 @@ void replace_change_mode_ok(ModContext*, void* args, void* retval, void*) {
     auto& result = *static_cast<bool*>(retval);
     result = ChangeModeOK::g_orig(camera, mode);
 
-    if (result || !unrestricted_items_enabled() || !unrestricted_items_camera_stage()) {
+    if (result || mode != 4 || !stage_first_person_enabled() || !unrestricted_items_camera_stage()) {
         return;
     }
 
@@ -536,11 +548,39 @@ ModResult install_hook(ModResult result, const char* name) {
     return result;
 }
 
+ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
+    UiControlDesc control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Enable first-person in Castle Town and Malo Mart";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_cvar_stage_first_person;
+    return svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+}
+
 }  // namespace
 
 extern "C" {
 MOD_EXPORT ModResult mod_initialize(ModError*) {
     ModResult result = MOD_OK;
+
+    ConfigVarDesc first_person_desc = CONFIG_VAR_DESC_INIT;
+    first_person_desc.name = "stageFirstPersonEnabled";
+    first_person_desc.type = CONFIG_VAR_BOOL;
+    first_person_desc.default_bool = false;
+
+    result = svc_config->register_var(mod_ctx, &first_person_desc, &g_cvar_stage_first_person);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register stage-first-person cvar");
+        return result;
+    }
+
+    UiModsPanelDesc panel_desc = UI_MODS_PANEL_DESC_INIT;
+    panel_desc.build = build_panel;
+    result = svc_ui->register_mods_panel(mod_ctx, &panel_desc);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register unrestricted-items mod panel");
+        return result;
+    }
 
     result = install_hook(
         mods::hook_replace<CheckAcceptUseItemInWater>(
