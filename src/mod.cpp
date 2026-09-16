@@ -295,6 +295,7 @@ std::vector<daAlink_c*> g_set_light_restore_stack;
 struct SavedOilCount {
     daAlink_c* player;
     s32 oil_count;
+    s32 item_oil_count;
     s32 item_now_oil;
 };
 std::vector<SavedOilCount> g_init_kandelaar_swing_oil_stack;
@@ -502,7 +503,7 @@ HookAction on_init_kandelaar_swing_pre(ModContext*, void* args, void*, void*) {
         !player->checkEventRun())
     {
         g_init_kandelaar_swing_oil_stack.push_back(
-            {player, dComIfGs_getOil(), dComIfGp_getItemNowOil()});
+            {player, dComIfGs_getOil(), dComIfGp_getItemOilCount(), dComIfGp_getItemNowOil()});
     }
     return HOOK_CONTINUE;
 }
@@ -513,11 +514,16 @@ void on_init_kandelaar_swing_post(ModContext*, void* args, void*, void*) {
         g_init_kandelaar_swing_oil_stack.back().player == player)
     {
         const s32 saved_oil = g_init_kandelaar_swing_oil_stack.back().oil_count;
+        const s32 saved_item_oil = g_init_kandelaar_swing_oil_stack.back().item_oil_count;
         const s32 saved_item_now_oil = g_init_kandelaar_swing_oil_stack.back().item_now_oil;
         g_init_kandelaar_swing_oil_stack.pop_back();
         const s32 oil_delta = saved_oil - dComIfGs_getOil();
-        if (oil_delta > 0) {
-            dComIfGp_setItemOilCount(oil_delta);
+        const s32 item_oil_delta = saved_item_oil - dComIfGp_getItemOilCount();
+        if (oil_delta != 0) {
+            dComIfGs_setOil(saved_oil);
+        }
+        if (item_oil_delta != 0) {
+            dComIfGp_setItemOilCount(item_oil_delta);
         }
         dComIfGp_setItemNowOil(saved_item_now_oil);
     }
