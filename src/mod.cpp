@@ -245,7 +245,7 @@ HookAction on_camera_run_pre(ModContext*, void* args, void*, void*) {
         camera->mCamTypeData[camera->mCurType].field_0x18[fallback_index][4];
     const s16 fallback_style =
         camera->mCamTypeData[field_type].field_0x18[fallback_index][4];
-    if (current_style < 0 && fallback_style >= 0) {
+    if (fallback_style >= 0 && current_style != fallback_style) {
         g_camera_run_style_stack.push_back({camera, camera->mCurType, fallback_index, current_style});
         camera->mCamTypeData[camera->mCurType].field_0x18[fallback_index][4] = fallback_style;
     }
