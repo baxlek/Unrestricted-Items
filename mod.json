@@ -3,7 +3,7 @@
   "name": "Unrestricted Items",
   "version": "1.0.0",
   "author": "baxlek",
-  "description": "Enables the Dusklight unrestricted-items cheat as a standalone mod.",
+  "description": "Removes most restrictions on when and where items can be used.",
   "abi": 1,
   "imports": [
     {
