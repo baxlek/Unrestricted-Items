@@ -1,22 +1,19 @@
-# Dusklight Mod Template
+# Unrestricted Items
 
-A standalone template for [Dusklight](https://github.com/TwilitRealm/dusklight) mods.
+A standalone [Dusklight](https://github.com/TwilitRealm/dusklight) mod that ports the
+`unrestricted-items` cheat branch into a reusable `.dusk` bundle.
 
 See the [Dusklight modding documentation](https://github.com/TwilitRealm/dusklight/blob/main/docs/modding.md)
 for the full mod API: services, hooking game functions, asset overlays, and more.
 
 ## Quick start
 
-1. Click "Use this template" to create a new repository for your mod.
-2. Edit `mod.json`: set your mod's `id` (reverse-DNS style, e.g. `com.example.my_mod`),
-   `name`, `author`, and `description`.
-3. Rename the target in `CMakeLists.txt` (`add_mod(my_mod ...)`) (this names the `.dusk` file).
-4. Write your mod in `src/mod.cpp`.
-5. Build locally:
+1. Build locally:
    ```sh
    cmake -B build
    cmake --build build
    ```
+2. Copy `build/mods/unrestricted_items.dusk` into your Dusklight mods folder.
 
 The result is `build/mods/<name>.dusk`. Copy it into the game's mods folder to try it:
 

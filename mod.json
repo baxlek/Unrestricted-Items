@@ -1,7 +1,41 @@
 {
-  "id": "com.example.my_mod",
-  "name": "My Mod",
+  "id": "dev.baxlek.unrestricted_items",
+  "name": "Unrestricted Items",
   "version": "1.0.0",
-  "author": "You",
-  "description": "An example Dusklight mod"
+  "author": "baxlek",
+  "description": "Enables the Dusklight unrestricted-items cheat as a standalone mod.",
+  "abi": 1,
+  "imports": [
+    {
+      "service_id": "dev.twilitrealm.dusklight.config",
+      "major": 1,
+      "min_minor": 0,
+      "optional": false
+    },
+    {
+      "service_id": "dev.twilitrealm.dusklight.game",
+      "major": 2,
+      "min_minor": 0,
+      "optional": false
+    },
+    {
+      "service_id": "dev.twilitrealm.dusklight.hook",
+      "major": 1,
+      "min_minor": 1,
+      "optional": false
+    },
+    {
+      "service_id": "dev.twilitrealm.dusklight.log",
+      "major": 1,
+      "min_minor": 0,
+      "optional": false
+    },
+    {
+      "service_id": "dev.twilitrealm.dusklight.ui",
+      "major": 1,
+      "min_minor": 2,
+      "optional": false
+    }
+  ],
+  "exports": []
 }
