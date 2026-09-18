@@ -1,7 +1,6 @@
 # Unrestricted Items
 
-A standalone [Dusklight](https://github.com/TwilitRealm/dusklight) mod that ports the
-`unrestricted-items` cheat branch into a reusable `.dusk` bundle.
+A standalone [Dusklight](https://github.com/TwilitRealm/dusklight) mod that removes most restrictions on when and where items can be used.
 
 See the [Dusklight modding documentation](https://github.com/TwilitRealm/dusklight/blob/main/docs/modding.md)
 for the full mod API: services, hooking game functions, asset overlays, and more.
