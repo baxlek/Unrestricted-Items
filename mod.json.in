@@ -1,7 +1,7 @@
 {
   "id": "dev.baxlek.unrestricted_items",
   "name": "Unrestricted Items",
-  "version": "1.0.0",
+  "version": "@PROJECT_VERSION@",
   "author": "baxlek",
   "description": "Removes most restrictions on when and where items can be used.",
   "abi": 1,
