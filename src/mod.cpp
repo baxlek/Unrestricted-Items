@@ -160,6 +160,24 @@ int unrestricted_items_fallback_new_item_change(daAlink_c* player, u8 selected_s
             if (player->checkDungeonWarpItem(selected_item)) {
                 return ITEM_PROC_DUNGEON_WARP_READY;
             }
+            if (player->checkItemSetButton(0x108) != 2 &&
+                (selected_item == dItemNo_WORM_e || selected_item == dItemNo_BEE_CHILD_e))
+            {
+                const u16 rod_item =
+                    dComIfGp_getSelectItem(player->checkItemSetButton(0x108));
+                if (rod_item == dItemNo_WORM_ROD_e || rod_item == dItemNo_JEWEL_WORM_ROD_e) {
+                    if (selected_item == dItemNo_BEE_CHILD_e) {
+                        return ITEM_PROC_BOTTLE_DRINK;
+                    }
+                    return ITEM_PROC_NONE;
+                }
+                if (selected_item == dItemNo_BEE_CHILD_e &&
+                    (rod_item == dItemNo_BEE_ROD_e || rod_item == dItemNo_JEWEL_BEE_ROD_e))
+                {
+                    return ITEM_PROC_BOTTLE_DRINK;
+                }
+                return ITEM_PROC_FISHING_FOOD;
+            }
             if (player->checkDrinkBottleItem(selected_item)) {
                 return ITEM_PROC_BOTTLE_DRINK;
             }
