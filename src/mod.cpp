@@ -92,6 +92,16 @@ bool unrestricted_items_camera_stage() {
     return daAlink_c::checkStageName("F_SP116") || daAlink_c::checkStageName("R_SP160");
 }
 
+// checkRoom() = checkRoomOnly() || checkRoomSpecial() || (R_SP161 term). checkRoomSpecial()
+// covers D_MN11 rooms 1 and 2 (plus the D_MN04 Lv2-dungeon special case handled separately by
+// checkLv2DungeonRoomSpecial/checkNotHeavyBootsStage). These "special" no-battle rooms are
+// distinct from the general checkRoomOnly() interior stages toggled by
+// interiorNormalMovementEnabled, so they need their own bypass here.
+bool unrestricted_items_special_no_battle_room() {
+    return daAlink_c::checkRoomSpecial() ||
+           (daAlink_c::checkStageName("R_SP161") && !dComIfGs_isOneZoneSwitch(14, -1));
+}
+
 bool lantern_ignores_water(const daAlink_c* player) {
     return unrestricted_items_enabled() &&
            (player->checkNoResetFlg0(daAlink_c::FLG0_WATER_IN_MOVE) ||
@@ -485,20 +495,23 @@ void replace_check_castle_town_use_item(ModContext*, void* args, void* retval, v
     result = CheckCastleTownUseItem::g_orig(item_no);
 }
 
-// checkNotBattleStage() = checkRoom() || checkCastleTown(). Some third-party mods (e.g. HUD
-// mods that add extra item slots) install their own add-pre hook on checkItemChangeFromButton
-// that reimplements the vanilla sword-trigger logic, including its own direct call to
-// checkNotBattleStage(). An add-pre hook that returns HOOK_SKIP_ORIGINAL runs instead of - and
-// is never superseded by - our replace-hook on checkItemChangeFromButton, so overriding that
-// target alone cannot fix Castle Town for players using such a mod. Patching
+// checkNotBattleStage() = checkRoom() || checkCastleTown(), and checkRoom() = checkRoomOnly()
+// || checkRoomSpecial() || (R_SP161 term). Some third-party mods (e.g. HUD mods that add extra
+// item slots) install their own add-pre hook on checkItemChangeFromButton that reimplements the
+// vanilla sword-trigger logic, including its own direct call to checkNotBattleStage(). An
+// add-pre hook that returns HOOK_SKIP_ORIGINAL runs instead of - and is never superseded by -
+// our replace-hook on checkItemChangeFromButton, so overriding that target alone cannot fix
+// Castle Town (or the special no-battle rooms below) for players using such a mod. Patching
 // checkNotBattleStage() itself instead affects every caller uniformly (vanilla code, our own
-// fallback, and any other mod's reimplementation), which is why we drop only the Castle Town
-// term here and leave checkRoom() (and the separate interior-normal-movement toggle it
-// respects) untouched.
+// fallback, and any other mod's reimplementation), which is why we drop the Castle Town and
+// special-room terms here and leave checkRoomOnly() (and the separate interior-normal-movement
+// toggle it respects) untouched.
 void replace_check_not_battle_stage(ModContext*, void*, void* retval, void*) {
     auto& result = *static_cast<bool*>(retval);
-    if (unrestricted_items_enabled() && daAlink_c::checkCastleTown()) {
-        result = daAlink_c::checkRoom();
+    if (unrestricted_items_enabled() &&
+        (daAlink_c::checkCastleTown() || unrestricted_items_special_no_battle_room()))
+    {
+        result = daAlink_c::checkRoomOnly();
         return;
     }
 
