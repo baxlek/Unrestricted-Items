@@ -715,7 +715,7 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
 
     control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_TOGGLE;
-    control.label = "Enable Normal Movement in Interiors";
+    control.label = "Move Normally in Houses";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_cvar_interior_normal_movement;
     return svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
