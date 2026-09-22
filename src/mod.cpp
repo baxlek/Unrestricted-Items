@@ -35,6 +35,7 @@ DEFINE_HOOK(&daAlink_c::initKandelaarSwing, InitKandelaarSwing);
 DEFINE_HOOK(&daAlink_c::checkNewItemChange, CheckNewItemChange);
 DEFINE_HOOK(&daAlink_c::checkNoSubjectModeCamera, CheckNoSubjectModeCamera);
 DEFINE_HOOK(&daAlink_c::checkNotHeavyBootsStage, CheckNotHeavyBootsStage);
+DEFINE_HOOK(&daAlink_c::checkHookshotStickBG, CheckHookshotStickBG);
 DEFINE_HOOK(&daAlink_c::checkRoomOnly, CheckRoomOnly);
 DEFINE_HOOK(&daAlink_c::procGrassWhistleWait, ProcGrassWhistleWait);
 DEFINE_HOOK(&daAlink_c::setLight, SetLight);
@@ -46,6 +47,7 @@ namespace {
 
 ConfigVarHandle g_cvar_stage_first_person = 0;
 ConfigVarHandle g_cvar_interior_normal_movement = 0;
+ConfigVarHandle g_cvar_unrestricted_clawshots = 0;
 
 bool unrestricted_items_enabled() {
     return true;
@@ -61,6 +63,13 @@ bool interior_normal_movement_enabled() {
     bool enabled = false;
     return g_cvar_interior_normal_movement != 0 &&
            svc_config->get_bool(mod_ctx, g_cvar_interior_normal_movement, &enabled) == MOD_OK &&
+           enabled;
+}
+
+bool unrestricted_clawshots_enabled() {
+    bool enabled = false;
+    return g_cvar_unrestricted_clawshots != 0 &&
+           svc_config->get_bool(mod_ctx, g_cvar_unrestricted_clawshots, &enabled) == MOD_OK &&
            enabled;
 }
 
@@ -90,6 +99,16 @@ bool unrestricted_items_water_active(const daAlink_c* player) {
 
 bool unrestricted_items_camera_stage() {
     return daAlink_c::checkStageName("F_SP116") || daAlink_c::checkStageName("R_SP160");
+}
+
+// checkRoom() = checkRoomOnly() || checkRoomSpecial() || (R_SP161 term). checkRoomSpecial()
+// covers D_MN11 rooms 1 and 2 (plus the D_MN04 Lv2-dungeon special case handled separately by
+// checkLv2DungeonRoomSpecial/checkNotHeavyBootsStage). These "special" no-battle rooms are
+// distinct from the general checkRoomOnly() interior stages toggled by
+// interiorNormalMovementEnabled, so they need their own bypass here.
+bool unrestricted_items_special_no_battle_room() {
+    return daAlink_c::checkRoomSpecial() ||
+           (daAlink_c::checkStageName("R_SP161") && !dComIfGs_isOneZoneSwitch(14, -1));
 }
 
 bool lantern_ignores_water(const daAlink_c* player) {
@@ -485,20 +504,23 @@ void replace_check_castle_town_use_item(ModContext*, void* args, void* retval, v
     result = CheckCastleTownUseItem::g_orig(item_no);
 }
 
-// checkNotBattleStage() = checkRoom() || checkCastleTown(). Some third-party mods (e.g. HUD
-// mods that add extra item slots) install their own add-pre hook on checkItemChangeFromButton
-// that reimplements the vanilla sword-trigger logic, including its own direct call to
-// checkNotBattleStage(). An add-pre hook that returns HOOK_SKIP_ORIGINAL runs instead of - and
-// is never superseded by - our replace-hook on checkItemChangeFromButton, so overriding that
-// target alone cannot fix Castle Town for players using such a mod. Patching
+// checkNotBattleStage() = checkRoom() || checkCastleTown(), and checkRoom() = checkRoomOnly()
+// || checkRoomSpecial() || (R_SP161 term). Some third-party mods (e.g. HUD mods that add extra
+// item slots) install their own add-pre hook on checkItemChangeFromButton that reimplements the
+// vanilla sword-trigger logic, including its own direct call to checkNotBattleStage(). An
+// add-pre hook that returns HOOK_SKIP_ORIGINAL runs instead of - and is never superseded by -
+// our replace-hook on checkItemChangeFromButton, so overriding that target alone cannot fix
+// Castle Town (or the special no-battle rooms below) for players using such a mod. Patching
 // checkNotBattleStage() itself instead affects every caller uniformly (vanilla code, our own
-// fallback, and any other mod's reimplementation), which is why we drop only the Castle Town
-// term here and leave checkRoom() (and the separate interior-normal-movement toggle it
-// respects) untouched.
+// fallback, and any other mod's reimplementation), which is why we drop the Castle Town and
+// special-room terms here and leave checkRoomOnly() (and the separate interior-normal-movement
+// toggle it respects) untouched.
 void replace_check_not_battle_stage(ModContext*, void*, void* retval, void*) {
     auto& result = *static_cast<bool*>(retval);
-    if (unrestricted_items_enabled() && daAlink_c::checkCastleTown()) {
-        result = daAlink_c::checkRoom();
+    if (unrestricted_items_enabled() &&
+        (daAlink_c::checkCastleTown() || unrestricted_items_special_no_battle_room()))
+    {
+        result = daAlink_c::checkRoomOnly();
         return;
     }
 
@@ -541,6 +563,24 @@ void replace_check_not_heavy_boots_stage(ModContext*, void*, void* retval, void*
     }
 
     result = CheckNotHeavyBootsStage::g_orig();
+}
+
+// checkHookshotStickBG() gates whether a surface the clawshot's chain hits is grabbable
+// (dComIfG_Bgsp().ChkPolyHSStick() plus a push/pull check). Mirrors the game's own "Super
+// Clawshot" cheat (dusk::getSettings().game.superClawshot in checkHookshotStickBG), but only
+// that one check - unlike the cheat, this toggle does not also extend clawshot range/speed
+// (setHookshotSight()'s max_length override and the other superClawshot call sites), since the
+// user only asked for unrestricted clawshot targets, not modified length and speed.
+void replace_check_hookshot_stick_bg(ModContext*, void* args, void* retval, void*) {
+    auto* player = mods::arg<daAlink_c*>(args, 0);
+    auto& polyinfo = mods::arg<cBgS_PolyInfo&>(args, 1);
+    auto& result = *static_cast<BOOL*>(retval);
+    if (unrestricted_clawshots_enabled()) {
+        result = TRUE;
+        return;
+    }
+
+    result = CheckHookshotStickBG::g_orig(player, polyinfo);
 }
 
 // checkRoomOnly() marks interior stages (houses, shops, and similar rooms) that the game
@@ -718,6 +758,16 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     control.label = "Move Normally in Houses";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_cvar_interior_normal_movement;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Unrestricted Clawshots";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_cvar_unrestricted_clawshots;
     return svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
 }
 
@@ -747,6 +797,18 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
         mod_ctx, &interior_movement_desc, &g_cvar_interior_normal_movement);
     if (result != MOD_OK) {
         svc_log->error(mod_ctx, "failed to register interior-normal-movement cvar");
+        return result;
+    }
+
+    ConfigVarDesc unrestricted_clawshots_desc = CONFIG_VAR_DESC_INIT;
+    unrestricted_clawshots_desc.name = "unrestrictedClawshotsEnabled";
+    unrestricted_clawshots_desc.type = CONFIG_VAR_BOOL;
+    unrestricted_clawshots_desc.default_bool = false;
+
+    result = svc_config->register_var(
+        mod_ctx, &unrestricted_clawshots_desc, &g_cvar_unrestricted_clawshots);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register unrestricted-clawshots cvar");
         return result;
     }
 
@@ -836,6 +898,10 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
         mods::hook_replace<CheckNotHeavyBootsStage>(
             svc_hook, replace_check_not_heavy_boots_stage),
         "failed to install CheckNotHeavyBootsStage");
+
+    install_hook(
+        mods::hook_replace<CheckHookshotStickBG>(svc_hook, replace_check_hookshot_stick_bg),
+        "failed to install CheckHookshotStickBG");
 
     install_hook(
         mods::hook_replace<CheckRoomOnly>(svc_hook, replace_check_room_only),
