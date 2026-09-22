@@ -24,6 +24,7 @@ IMPORT_SERVICE(UiService, svc_ui);
 
 DEFINE_HOOK(&daAlink_c::checkAcceptUseItemInWater, CheckAcceptUseItemInWater);
 DEFINE_HOOK(&daAlink_c::checkCastleTownUseItem, CheckCastleTownUseItem);
+DEFINE_HOOK(&daAlink_c::checkNotBattleStage, CheckNotBattleStage);
 DEFINE_HOOK(&daAlink_c::setStartProcInit, SetStartProcInit);
 DEFINE_HOOK(&daAlink_c::checkItemAction, CheckItemAction);
 DEFINE_HOOK(&daAlink_c::checkItemChangeFromButton, CheckItemChangeFromButton);
@@ -484,6 +485,26 @@ void replace_check_castle_town_use_item(ModContext*, void* args, void* retval, v
     result = CheckCastleTownUseItem::g_orig(item_no);
 }
 
+// checkNotBattleStage() = checkRoom() || checkCastleTown(). Some third-party mods (e.g. HUD
+// mods that add extra item slots) install their own add-pre hook on checkItemChangeFromButton
+// that reimplements the vanilla sword-trigger logic, including its own direct call to
+// checkNotBattleStage(). An add-pre hook that returns HOOK_SKIP_ORIGINAL runs instead of - and
+// is never superseded by - our replace-hook on checkItemChangeFromButton, so overriding that
+// target alone cannot fix Castle Town for players using such a mod. Patching
+// checkNotBattleStage() itself instead affects every caller uniformly (vanilla code, our own
+// fallback, and any other mod's reimplementation), which is why we drop only the Castle Town
+// term here and leave checkRoom() (and the separate interior-normal-movement toggle it
+// respects) untouched.
+void replace_check_not_battle_stage(ModContext*, void*, void* retval, void*) {
+    auto& result = *static_cast<bool*>(retval);
+    if (unrestricted_items_enabled() && daAlink_c::checkCastleTown()) {
+        result = daAlink_c::checkRoom();
+        return;
+    }
+
+    result = CheckNotBattleStage::g_orig();
+}
+
 void replace_swim_delete_item(ModContext*, void* args, void*, void*) {
     auto* player = mods::arg<daAlink_c*>(args, 0);
     const bool keep_lantern_out =
@@ -748,14 +769,22 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
             svc_hook, replace_check_accept_use_item_in_water),
         "failed to install CheckAcceptUseItemInWater");
 
-    // These three hooks are what let the sword be equipped/drawn while in Castle Town. Some
-    // third-party HUD/item mods install their own replace-hook on the same targets (e.g. to
-    // support extra item slots); take over unconditionally so our fix isn't silently lost to
-    // HOOK_REPLACE_CONFLICT based on mod load order.
+    // These hooks are what let the sword be equipped/drawn while in Castle Town. Some
+    // third-party HUD/item mods install their own replace-hook (or an add-pre hook that
+    // reimplements the same logic) on these targets, e.g. to support extra item slots; take
+    // over CheckCastleTownUseItem/SetStartProcInit unconditionally so our fix isn't silently
+    // lost to HOOK_REPLACE_CONFLICT based on mod load order. CheckNotBattleStage additionally
+    // guards against mods whose own add-pre hook on CheckItemChangeFromButton bypasses our
+    // replace-hook there entirely (see replace_check_not_battle_stage for details).
     install_hook(
         mods::hook_replace<CheckCastleTownUseItem>(
             svc_hook, replace_check_castle_town_use_item, critical_replace_options()),
         "failed to install CheckCastleTownUseItem");
+
+    install_hook(
+        mods::hook_replace<CheckNotBattleStage>(
+            svc_hook, replace_check_not_battle_stage, critical_replace_options()),
+        "failed to install CheckNotBattleStage");
 
     install_hook(
         mods::hook_replace<SetStartProcInit>(
