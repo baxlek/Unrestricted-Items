@@ -5,6 +5,7 @@
 #include "mods/svc/log.h"
 #include "mods/svc/ui.h"
 
+#include <cstdint>
 #include <vector>
 
 #include "d/actor/d_a_alink.h"
@@ -657,6 +658,22 @@ void on_init_kandelaar_swing_post(ModContext*, void* args, void*, void*) {
     }
 }
 
+// Some third-party HUD/item mods install their own replace-hook on the same targets we do
+// (e.g. to add extra item slots). Dusklight's default replace policy (HOOK_REPLACE_CONFLICT)
+// means whichever mod installs first "wins" and the other's install call fails outright. For
+// the handful of hooks that are essential to unrestricted-items' core purpose (letting the
+// sword be drawn in Castle Town), we ask to unconditionally take over the target instead of
+// silently losing to another mod's replace-hook based on load order.
+const HookOptions* critical_replace_options() {
+    static const HookOptions options = {
+        sizeof(HookOptions), INT32_MAX, HOOK_REPLACE_OVERRIDE, nullptr};
+    return &options;
+}
+
+// A single conflicting/failed hook install must not take down every other independent fix this
+// mod provides. install_hook() logs failures but always lets mod_initialize keep going, so e.g.
+// a HUD mod that conflicts with an earlier, unrelated hook doesn't silently disable the Castle
+// Town sword-draw fix (or any other toggle) registered later in mod_initialize.
 ModResult install_hook(ModResult result, const char* name) {
     if (result != MOD_OK) {
         svc_log->error(mod_ctx, name);
@@ -720,160 +737,108 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
         return result;
     }
 
-    result = install_hook(
+    // From here on, hook installs are individually optional: a conflict on any one target (for
+    // example, another mod's replace-hook on an unrelated function) must not prevent the rest of
+    // this mod's fixes from installing. install_hook() logs each failure; we deliberately do not
+    // return early so a single conflict can't silently disable every other toggle this mod
+    // provides (including the Castle Town sword-draw fix, if it happens to be registered after
+    // whichever hook conflicted).
+    install_hook(
         mods::hook_replace<CheckAcceptUseItemInWater>(
             svc_hook, replace_check_accept_use_item_in_water),
         "failed to install CheckAcceptUseItemInWater");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    // These three hooks are what let the sword be equipped/drawn while in Castle Town. Some
+    // third-party HUD/item mods install their own replace-hook on the same targets (e.g. to
+    // support extra item slots); take over unconditionally so our fix isn't silently lost to
+    // HOOK_REPLACE_CONFLICT based on mod load order.
+    install_hook(
         mods::hook_replace<CheckCastleTownUseItem>(
-            svc_hook, replace_check_castle_town_use_item),
+            svc_hook, replace_check_castle_town_use_item, critical_replace_options()),
         "failed to install CheckCastleTownUseItem");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
-        mods::hook_replace<SetStartProcInit>(svc_hook, replace_set_start_proc_init),
+    install_hook(
+        mods::hook_replace<SetStartProcInit>(
+            svc_hook, replace_set_start_proc_init, critical_replace_options()),
         "failed to install SetStartProcInit");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_replace<CheckItemAction>(svc_hook, replace_check_item_action),
         "failed to install CheckItemAction");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_replace<CheckItemChangeFromButton>(
-            svc_hook, replace_check_item_change_from_button),
+            svc_hook, replace_check_item_change_from_button, critical_replace_options()),
         "failed to install CheckItemChangeFromButton");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_replace<SwimDeleteItem>(svc_hook, replace_swim_delete_item),
         "failed to install SwimDeleteItem");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_add_pre<CheckWaterInKandelaar>(
             svc_hook, on_check_water_in_kandelaar_pre),
         "failed to install CheckWaterInKandelaar");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_add_post<CheckKandelaarSwing>(
             svc_hook, on_check_kandelaar_swing_post),
         "failed to install CheckKandelaarSwing");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_add_pre<InitKandelaarSwing>(svc_hook, on_init_kandelaar_swing_pre),
         "failed to install InitKandelaarSwing pre-hook");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_add_post<InitKandelaarSwing>(svc_hook, on_init_kandelaar_swing_post),
         "failed to install InitKandelaarSwing post-hook");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_replace<CheckNewItemChange>(
             svc_hook, replace_check_new_item_change),
         "failed to install CheckNewItemChange");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_replace<CheckNoSubjectModeCamera>(
             svc_hook, replace_check_no_subject_mode_camera),
         "failed to install CheckNoSubjectModeCamera");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_replace<CheckNotHeavyBootsStage>(
             svc_hook, replace_check_not_heavy_boots_stage),
         "failed to install CheckNotHeavyBootsStage");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_replace<CheckRoomOnly>(svc_hook, replace_check_room_only),
         "failed to install CheckRoomOnly");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_replace<ProcGrassWhistleWait>(svc_hook, replace_proc_grass_whistle_wait),
         "failed to install ProcGrassWhistleWait");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_add_pre<SetLight>(svc_hook, on_set_light_pre),
         "failed to install SetLight pre-hook");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_add_post<SetLight>(svc_hook, on_set_light_post),
         "failed to install SetLight post-hook");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_replace<AlphaAnimeKantera>(svc_hook, replace_alpha_anime_kantera),
         "failed to install AlphaAnimeKantera");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_replace<ChangeModeOK>(svc_hook, replace_change_mode_ok),
         "failed to install ChangeModeOK");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_add_post<CameraRun>(svc_hook, on_camera_run_post),
         "failed to install CameraRun post-hook");
-    if (result != MOD_OK) {
-        return result;
-    }
 
-    result = install_hook(
+    install_hook(
         mods::hook_add_pre<CameraRun>(svc_hook, on_camera_run_pre),
         "failed to install CameraRun pre-hook");
-    if (result != MOD_OK) {
-        return result;
-    }
 
     svc_log->info(mod_ctx, "unrestricted_items initialized");
     return MOD_OK;
