@@ -33,6 +33,7 @@ DEFINE_HOOK(&daAlink_c::initKandelaarSwing, InitKandelaarSwing);
 DEFINE_HOOK(&daAlink_c::checkNewItemChange, CheckNewItemChange);
 DEFINE_HOOK(&daAlink_c::checkNoSubjectModeCamera, CheckNoSubjectModeCamera);
 DEFINE_HOOK(&daAlink_c::checkNotHeavyBootsStage, CheckNotHeavyBootsStage);
+DEFINE_HOOK(&daAlink_c::checkRoomOnly, CheckRoomOnly);
 DEFINE_HOOK(&daAlink_c::procGrassWhistleWait, ProcGrassWhistleWait);
 DEFINE_HOOK(&daAlink_c::setLight, SetLight);
 DEFINE_HOOK(&dCamera_c::ChangeModeOK, ChangeModeOK);
@@ -42,6 +43,7 @@ DEFINE_HOOK(&dMeter2_c::alphaAnimeKantera, AlphaAnimeKantera);
 namespace {
 
 ConfigVarHandle g_cvar_stage_first_person = 0;
+ConfigVarHandle g_cvar_interior_normal_movement = 0;
 
 bool unrestricted_items_enabled() {
     return true;
@@ -51,6 +53,13 @@ bool stage_first_person_enabled() {
     bool enabled = false;
     return g_cvar_stage_first_person != 0 &&
            svc_config->get_bool(mod_ctx, g_cvar_stage_first_person, &enabled) == MOD_OK && enabled;
+}
+
+bool interior_normal_movement_enabled() {
+    bool enabled = false;
+    return g_cvar_interior_normal_movement != 0 &&
+           svc_config->get_bool(mod_ctx, g_cvar_interior_normal_movement, &enabled) == MOD_OK &&
+           enabled;
 }
 
 enum daAlink_ItemProc {
@@ -512,6 +521,21 @@ void replace_check_not_heavy_boots_stage(ModContext*, void*, void* retval, void*
     result = CheckNotHeavyBootsStage::g_orig();
 }
 
+// checkRoomOnly() marks interior stages (houses, shops, and similar rooms) that the game
+// otherwise limits to walking speed, disallow climbing/hanging, and treats as non-battle
+// stages (blocking sword draw, guarding, etc. via checkNotBattleStage/checkNotAutoJumpStage).
+// Bypassing it here restores normal movement and combat while indoors, without touching the
+// separate Castle Town and special dungeon no-battle-room restrictions.
+void replace_check_room_only(ModContext*, void*, void* retval, void*) {
+    auto& result = *static_cast<bool*>(retval);
+    if (interior_normal_movement_enabled()) {
+        result = false;
+        return;
+    }
+
+    result = CheckRoomOnly::g_orig();
+}
+
 void replace_set_start_proc_init(ModContext*, void* args, void* retval, void*) {
     auto* player = mods::arg<daAlink_c*>(args, 0);
     auto& result = *static_cast<int*>(retval);
@@ -646,6 +670,16 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     control.label = "Enable FPV in Castle Town";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_cvar_stage_first_person;
+    ModResult result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Enable Normal Movement in Interiors";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_cvar_interior_normal_movement;
     return svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
 }
 
@@ -663,6 +697,18 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
     result = svc_config->register_var(mod_ctx, &first_person_desc, &g_cvar_stage_first_person);
     if (result != MOD_OK) {
         svc_log->error(mod_ctx, "failed to register stage-first-person cvar");
+        return result;
+    }
+
+    ConfigVarDesc interior_movement_desc = CONFIG_VAR_DESC_INIT;
+    interior_movement_desc.name = "interiorNormalMovementEnabled";
+    interior_movement_desc.type = CONFIG_VAR_BOOL;
+    interior_movement_desc.default_bool = false;
+
+    result = svc_config->register_var(
+        mod_ctx, &interior_movement_desc, &g_cvar_interior_normal_movement);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register interior-normal-movement cvar");
         return result;
     }
 
@@ -769,6 +815,13 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
         mods::hook_replace<CheckNotHeavyBootsStage>(
             svc_hook, replace_check_not_heavy_boots_stage),
         "failed to install CheckNotHeavyBootsStage");
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    result = install_hook(
+        mods::hook_replace<CheckRoomOnly>(svc_hook, replace_check_room_only),
+        "failed to install CheckRoomOnly");
     if (result != MOD_OK) {
         return result;
     }
