@@ -13,12 +13,6 @@
       "optional": false
     },
     {
-      "service_id": "dev.twilitrealm.dusklight.game",
-      "major": 2,
-      "min_minor": 0,
-      "optional": false
-    },
-    {
       "service_id": "dev.twilitrealm.dusklight.hook",
       "major": 1,
       "min_minor": 1,
