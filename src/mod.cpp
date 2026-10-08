@@ -38,6 +38,7 @@ DEFINE_HOOK(&daAlink_c::checkNotHeavyBootsStage, CheckNotHeavyBootsStage);
 DEFINE_HOOK(&daAlink_c::checkHookshotStickBG, CheckHookshotStickBG);
 DEFINE_HOOK(&daAlink_c::checkRoomOnly, CheckRoomOnly);
 DEFINE_HOOK(&daAlink_c::procGrassWhistleWait, ProcGrassWhistleWait);
+DEFINE_HOOK(&daAlink_c::rideGetOff, RideGetOff);
 DEFINE_HOOK(&daAlink_c::setLight, SetLight);
 DEFINE_HOOK(&dCamera_c::ChangeModeOK, ChangeModeOK);
 DEFINE_HOOK(&dCamera_c::Run, CameraRun);
@@ -109,6 +110,26 @@ bool unrestricted_items_camera_stage() {
 bool unrestricted_items_special_no_battle_room() {
     return daAlink_c::checkRoomSpecial() ||
            (daAlink_c::checkStageName("R_SP161") && !dComIfGs_isOneZoneSwitch(14, -1));
+}
+
+// Unlike the bow/boomerang/hookshot/bottle/lantern item actions, vanilla never added
+// dedicated PROC_HORSE_* variants for the Copy (Dominion) Rod or the fishing rod, so entering
+// their ground-based daAlink_PROC states (via m_procInitTable) always clears MODE_RIDING and
+// triggers commonProcInit's automatic rideGetOff() call. This mod unlocks equipping/using those
+// two items on Epona, so this identifies the proc states that need to suppress that automatic
+// dismount (see replace_ride_get_off).
+bool proc_keeps_horse_ride_while_using_item(u16 proc_id) {
+    switch (proc_id) {
+        case daAlink_c::PROC_COPY_ROD_SUBJECT:
+        case daAlink_c::PROC_COPY_ROD_MOVE:
+        case daAlink_c::PROC_COPY_ROD_SWING:
+        case daAlink_c::PROC_COPY_ROD_REVIVE:
+        case daAlink_c::PROC_FISHING_CAST:
+        case daAlink_c::PROC_FISHING_FOOD:
+            return true;
+        default:
+            return false;
+    }
 }
 
 bool lantern_ignores_water(const daAlink_c* player) {
@@ -611,15 +632,47 @@ void replace_check_item_action(ModContext*, void* args, void* retval, void*) {
         daAlink_c::checkFishingRodItem(player->mEquipItem) &&
         player->mLinkAcch.ChkGroundHit() &&
         !player->checkNoResetFlg0(daAlink_c::FLG0_SWIM_UP);
+    // Casting requires mLinkAcch.ChkGroundHit(), which never registers while Link is seated on
+    // Epona (his own collision isn't grounded; he rides the horse's). Temporarily fake the
+    // ground-hit flag so the cast can start, mirroring the mWaterY trick above for the
+    // underwater case.
+    const bool bypass_fishing_horse_limit =
+        unrestricted_items_enabled() &&
+        daAlink_c::checkFishingRodItem(player->mEquipItem) &&
+        player->checkHorseRide() &&
+        !player->mLinkAcch.ChkGroundHit();
     const f32 saved_water_y = player->mWaterY;
 
     if (bypass_fishing_water_limit) {
         player->mWaterY = player->current.pos.y;
     }
+    if (bypass_fishing_horse_limit) {
+        player->mLinkAcch.SetGroundHit();
+    }
 
     auto& result = *static_cast<BOOL*>(retval);
     result = CheckItemAction::g_orig(player);
     player->mWaterY = saved_water_y;
+    if (bypass_fishing_horse_limit) {
+        player->mLinkAcch.ClrGroundHit();
+    }
+}
+
+void replace_ride_get_off(ModContext*, void* args, void*, void*) {
+    auto* player = mods::arg<daAlink_c*>(args, 0);
+    if (unrestricted_items_enabled() && player->checkHorseRide() &&
+        proc_keeps_horse_ride_while_using_item(player->mProcID))
+    {
+        // commonProcInit() already overwrote mModeFlg from m_procInitTable before calling
+        // rideGetOff(), clearing MODE_RIDING because these item-action procs (unlike the
+        // vanilla PROC_HORSE_BOW_SUBJECT/etc. states) were never designed with a horseback
+        // variant. Restore the flag and skip the dismount entirely so using the Dominion Rod
+        // or fishing rod on Epona doesn't knock the player off.
+        player->onModeFlg(daAlink_c::MODE_RIDING);
+        return;
+    }
+
+    RideGetOff::g_orig(player);
 }
 
 void replace_check_item_change_from_button(ModContext*, void* args, void* retval, void*) {
@@ -856,6 +909,10 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
     install_hook(
         mods::hook_replace<CheckItemAction>(svc_hook, replace_check_item_action),
         "failed to install CheckItemAction");
+
+    install_hook(
+        mods::hook_replace<RideGetOff>(svc_hook, replace_ride_get_off),
+        "failed to install RideGetOff");
 
     install_hook(
         mods::hook_replace<CheckItemChangeFromButton>(
