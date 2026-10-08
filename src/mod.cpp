@@ -39,6 +39,12 @@ DEFINE_HOOK(&daAlink_c::checkHookshotStickBG, CheckHookshotStickBG);
 DEFINE_HOOK(&daAlink_c::checkRoomOnly, CheckRoomOnly);
 DEFINE_HOOK(&daAlink_c::procGrassWhistleWait, ProcGrassWhistleWait);
 DEFINE_HOOK(&daAlink_c::rideGetOff, RideGetOff);
+DEFINE_HOOK(&daAlink_c::procCopyRodSubject, ProcCopyRodSubject);
+DEFINE_HOOK(&daAlink_c::procCopyRodMove, ProcCopyRodMove);
+DEFINE_HOOK(&daAlink_c::procCopyRodSwing, ProcCopyRodSwing);
+DEFINE_HOOK(&daAlink_c::procCopyRodRevive, ProcCopyRodRevive);
+DEFINE_HOOK(&daAlink_c::procFishingCast, ProcFishingCast);
+DEFINE_HOOK(&daAlink_c::procFishingFood, ProcFishingFood);
 DEFINE_HOOK(&daAlink_c::setLight, SetLight);
 DEFINE_HOOK(&dCamera_c::ChangeModeOK, ChangeModeOK);
 DEFINE_HOOK(&dCamera_c::Run, CameraRun);
@@ -675,6 +681,24 @@ void replace_ride_get_off(ModContext*, void* args, void*, void*) {
     RideGetOff::g_orig(player);
 }
 
+// Suppressing the dismount (replace_ride_get_off) isn't enough on its own: none of the Copy
+// Rod/fishing-rod per-frame proc functions call setSyncRidePos() the way the vanilla
+// PROC_HORSE_* item states do, so Link's position keeps falling under normal gravity/ground
+// collision each frame instead of tracking Epona, and he ends up standing on the ground
+// beneath her. Re-sync his position and lower-body animation to the horse every frame these
+// procs run, exactly as the vanilla horseback item states do, while leaving the proc's own
+// (upper-body) animation and input handling untouched so it keeps controlling the item.
+HookAction sync_horse_ride_for_item_proc_pre(ModContext*, void* args, void*, void*) {
+    auto* player = mods::arg<daAlink_c*>(args, 0);
+    if (unrestricted_items_enabled() && player->checkHorseRide() &&
+        proc_keeps_horse_ride_while_using_item(player->mProcID))
+    {
+        player->setSyncRidePos();
+        player->setBaseRideAnime();
+    }
+    return HOOK_CONTINUE;
+}
+
 void replace_check_item_change_from_button(ModContext*, void* args, void* retval, void*) {
     auto* player = mods::arg<daAlink_c*>(args, 0);
     auto& result = *static_cast<BOOL*>(retval);
@@ -913,6 +937,25 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
     install_hook(
         mods::hook_replace<RideGetOff>(svc_hook, replace_ride_get_off),
         "failed to install RideGetOff");
+
+    install_hook(
+        mods::hook_add_pre<ProcCopyRodSubject>(svc_hook, sync_horse_ride_for_item_proc_pre),
+        "failed to install ProcCopyRodSubject");
+    install_hook(
+        mods::hook_add_pre<ProcCopyRodMove>(svc_hook, sync_horse_ride_for_item_proc_pre),
+        "failed to install ProcCopyRodMove");
+    install_hook(
+        mods::hook_add_pre<ProcCopyRodSwing>(svc_hook, sync_horse_ride_for_item_proc_pre),
+        "failed to install ProcCopyRodSwing");
+    install_hook(
+        mods::hook_add_pre<ProcCopyRodRevive>(svc_hook, sync_horse_ride_for_item_proc_pre),
+        "failed to install ProcCopyRodRevive");
+    install_hook(
+        mods::hook_add_pre<ProcFishingCast>(svc_hook, sync_horse_ride_for_item_proc_pre),
+        "failed to install ProcFishingCast");
+    install_hook(
+        mods::hook_add_pre<ProcFishingFood>(svc_hook, sync_horse_ride_for_item_proc_pre),
+        "failed to install ProcFishingFood");
 
     install_hook(
         mods::hook_replace<CheckItemChangeFromButton>(
