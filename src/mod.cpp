@@ -149,6 +149,16 @@ int unrestricted_items_fallback_new_item_change(daAlink_c* player, u8 selected_s
         return ITEM_PROC_NONE;
     }
 
+    // Vanilla keeps the Fishing Rod and Dominion Rod unusable while on horseback
+    // (checkModeFlg(0x400) == MODE_RIDING). This mod intentionally lifts many item
+    // restrictions, but using these two items on Epona is not intended behavior and
+    // must remain blocked.
+    if (player->checkModeFlg(0x400) &&
+        (selected_item == dItemNo_COPY_ROD_e || daAlink_c::checkFishingRodItem(selected_item)))
+    {
+        return ITEM_PROC_NONE;
+    }
+
     if (selected_item == dItemNo_HVY_BOOTS_e ||
         player->checkDungeonWarpItem(selected_item) ||
         player->checkTradeItem(selected_item) ||
