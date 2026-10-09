@@ -14,6 +14,7 @@
 #include "d/d_meter2.h"
 #include "d/d_meter2_draw.h"
 #include "d/d_item_data.h"
+#include "Z2AudioLib/Z2SeMgr.h"
 
 DEFINE_MOD();
 
@@ -33,6 +34,7 @@ DEFINE_HOOK(&daAlink_c::checkWaterInKandelaar, CheckWaterInKandelaar);
 DEFINE_HOOK(&daAlink_c::checkKandelaarSwing, CheckKandelaarSwing);
 DEFINE_HOOK(&daAlink_c::initKandelaarSwing, InitKandelaarSwing);
 DEFINE_HOOK(&daAlink_c::checkNewItemChange, CheckNewItemChange);
+DEFINE_HOOK(&daAlink_c::changeItemTriggerKeepProc, ChangeItemTriggerKeepProc);
 DEFINE_HOOK(&daAlink_c::checkNoSubjectModeCamera, CheckNoSubjectModeCamera);
 DEFINE_HOOK(&daAlink_c::checkNotHeavyBootsStage, CheckNotHeavyBootsStage);
 DEFINE_HOOK(&daAlink_c::checkHookshotStickBG, CheckHookshotStickBG);
@@ -149,6 +151,16 @@ int unrestricted_items_fallback_new_item_change(daAlink_c* player, u8 selected_s
         return ITEM_PROC_NONE;
     }
 
+    // Vanilla keeps the Fishing Rod and Dominion Rod unusable while on horseback
+    // (checkModeFlg(0x400) == MODE_RIDING). This mod intentionally lifts many item
+    // restrictions, but using these two items on Epona is not intended behavior and
+    // must remain blocked.
+    if (player->checkModeFlg(0x400) &&
+        (selected_item == dItemNo_COPY_ROD_e || daAlink_c::checkFishingRodItem(selected_item)))
+    {
+        return ITEM_PROC_NONE;
+    }
+
     if (selected_item == dItemNo_HVY_BOOTS_e ||
         player->checkDungeonWarpItem(selected_item) ||
         player->checkTradeItem(selected_item) ||
@@ -167,6 +179,15 @@ int unrestricted_items_fallback_new_item_change(daAlink_c* player, u8 selected_s
                 player->checkItemSetButton(dItemNo_KANTERA_e) != 2)
             {
                 return ITEM_PROC_KANDELAAR_POUR;
+            }
+
+            // Hawkeye is otherwise blocked while riding Epona; this mod allows it,
+            // redirected to horseback-safe handling in ChangeItemTriggerKeepProc's
+            // pre-hook. Horse Call remains blocked on horseback, matching vanilla.
+            if (player->checkReinRide() && selected_item == dItemNo_HAWK_EYE_e &&
+                player->acceptSubjectModeChange())
+            {
+                return ITEM_PROC_SUBJECTIVITY;
             }
         } else if (selected_item == dItemNo_HVY_BOOTS_e) {
             if (!player->checkBoardRide()) {
@@ -665,6 +686,33 @@ void replace_proc_grass_whistle_wait(ModContext*, void* args, void* retval, void
     player->mProcVar2.field_0x300c = saved_whistle_type;
 }
 
+// Vanilla's ITEM_PROC_SUBJECTIVITY branch of changeItemTriggerKeepProc calls
+// procCoSubjectivityInit(), whose proc-table entry doesn't keep MODE_RIDING set;
+// entering it while on Epona would trigger commonProcInit's automatic rideGetOff()
+// dismount. Redirect Hawkeye to procHorseSubjectivityInit() instead, the same
+// MODE_RIDING-compatible peep mode vanilla already enters when holding R on
+// horseback.
+HookAction on_change_item_trigger_keep_proc_pre(ModContext*, void* args, void* retval, void*) {
+    auto* player = mods::arg<daAlink_c*>(args, 0);
+    const u8 selected_slot = mods::arg<u8>(args, 1);
+    const int proc_type = mods::arg<int>(args, 2);
+
+    if (!unrestricted_items_enabled() || !player->checkReinRide()) {
+        return HOOK_CONTINUE;
+    }
+
+    if (proc_type == ITEM_PROC_SUBJECTIVITY) {
+        player->mSelectItemId = selected_slot;
+        player->procHorseSubjectivityInit();
+        dComIfGp_setPlayerStatus0(0, 0x200000);
+        player->seStartSystem(Z2SE_AL_HAWK_EYE_PUTON);
+        *static_cast<int*>(retval) = 1;
+        return HOOK_SKIP_ORIGINAL;
+    }
+
+    return HOOK_CONTINUE;
+}
+
 void replace_change_mode_ok(ModContext*, void* args, void* retval, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
     const s32 mode = mods::arg<s32>(args, 1);
@@ -888,6 +936,11 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
         mods::hook_replace<CheckNewItemChange>(
             svc_hook, replace_check_new_item_change),
         "failed to install CheckNewItemChange");
+
+    install_hook(
+        mods::hook_add_pre<ChangeItemTriggerKeepProc>(
+            svc_hook, on_change_item_trigger_keep_proc_pre),
+        "failed to install ChangeItemTriggerKeepProc pre-hook");
 
     install_hook(
         mods::hook_replace<CheckNoSubjectModeCamera>(
