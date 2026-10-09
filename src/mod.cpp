@@ -14,7 +14,6 @@
 #include "d/d_meter2.h"
 #include "d/d_meter2_draw.h"
 #include "d/d_item_data.h"
-#include "f_op/f_op_msg_mng.h"
 #include "Z2AudioLib/Z2SeMgr.h"
 
 DEFINE_MOD();
@@ -41,6 +40,7 @@ DEFINE_HOOK(&daAlink_c::checkNotHeavyBootsStage, CheckNotHeavyBootsStage);
 DEFINE_HOOK(&daAlink_c::checkHookshotStickBG, CheckHookshotStickBG);
 DEFINE_HOOK(&daAlink_c::checkRoomOnly, CheckRoomOnly);
 DEFINE_HOOK(&daAlink_c::procGrassWhistleWait, ProcGrassWhistleWait);
+DEFINE_HOOK(&daAlink_c::rideGetOff, RideGetOff);
 DEFINE_HOOK(&daAlink_c::setLight, SetLight);
 DEFINE_HOOK(&dCamera_c::ChangeModeOK, ChangeModeOK);
 DEFINE_HOOK(&dCamera_c::Run, CameraRun);
@@ -183,9 +183,10 @@ int unrestricted_items_fallback_new_item_change(daAlink_c* player, u8 selected_s
             }
 
             // Hawkeye and Horse Call are otherwise blocked while riding Epona; this mod
-            // allows them. ChangeItemTriggerKeepProc (hooked below) redirects both of
-            // these proc types to horseback-safe handling instead of vanilla's
-            // ground-only implementations.
+            // allows them. Hawkeye is redirected to horseback-safe handling in
+            // ChangeItemTriggerKeepProc's pre-hook; Horse Call runs through vanilla's
+            // real, unmodified proc (see on_ride_get_off_pre / replace_proc_grass_whistle_wait
+            // for how it's kept safe/forced to "Nothing happened..." while mounted).
             if (player->checkReinRide()) {
                 if (selected_item == dItemNo_HAWK_EYE_e && player->acceptSubjectModeChange()) {
                     return ITEM_PROC_SUBJECTIVITY;
@@ -675,14 +676,20 @@ void replace_check_item_change_from_button(ModContext*, void* args, void* retval
 
 void replace_proc_grass_whistle_wait(ModContext*, void* args, void* retval, void*) {
     auto* player = mods::arg<daAlink_c*>(args, 0);
-    const bool suppress_underwater_horse_call =
+    // Forces daHorse_c::callHorse()'s result to be bypassed (temp_r4 = 0, "Nothing
+    // happened...") for exactly the single frame it's evaluated on, either because the
+    // player is underwater (an existing restriction) or because they're already riding
+    // Epona (calling her again while mounted doesn't make sense, and the real distance
+    // check would otherwise silently cancel with no message at all instead of showing
+    // one, since Link is essentially standing right on top of the horse actor).
+    const bool force_nothing_happened =
         unrestricted_items_enabled() &&
         (player->mProcVar2.field_0x300c == 1 || player->mProcVar2.field_0x300c == 3) &&
         player->mProcVar0.field_0x3008 == 1 &&
-        !player->checkNoResetFlg0(daAlink_c::FLG0_SWIM_UP);
+        (player->checkReinRide() || !player->checkNoResetFlg0(daAlink_c::FLG0_SWIM_UP));
     const s16 saved_whistle_type = player->mProcVar2.field_0x300c;
 
-    if (suppress_underwater_horse_call) {
+    if (force_nothing_happened) {
         player->mProcVar2.field_0x300c = 0;
     }
 
@@ -691,16 +698,18 @@ void replace_proc_grass_whistle_wait(ModContext*, void* args, void* retval, void
     player->mProcVar2.field_0x300c = saved_whistle_type;
 }
 
-// Vanilla's ITEM_PROC_SUBJECTIVITY and ITEM_PROC_GRASS_WHISTLE branches of
-// changeItemTriggerKeepProc call procCoSubjectivityInit() and
-// procGrassWhistleWaitInit(), neither of which keep MODE_RIDING set in their proc-table
-// entry; entering either while on Epona would trigger commonProcInit's automatic
-// rideGetOff() dismount. Redirect both to horseback-safe handling instead:
-//  - Hawkeye reuses procHorseSubjectivityInit(), the same MODE_RIDING-compatible peep
-//    mode vanilla already enters when holding R on horseback.
-//  - Horse Call just reports vanilla's "Nothing happened..." feedback (msg 0x532, the
-//    same message daHorse_c::callHorseSubstance() shows when the call fails) since
-//    calling Epona while already riding her doesn't make sense.
+// Vanilla's ITEM_PROC_SUBJECTIVITY branch of changeItemTriggerKeepProc calls
+// procCoSubjectivityInit(), whose proc-table entry doesn't keep MODE_RIDING set;
+// entering it while on Epona would trigger commonProcInit's automatic rideGetOff()
+// dismount. Redirect Hawkeye to procHorseSubjectivityInit() instead, the same
+// MODE_RIDING-compatible peep mode vanilla already enters when holding R on
+// horseback. ITEM_PROC_GRASS_WHISTLE (Horse Call) is intentionally left to run
+// through the real, unmodified changeItemTriggerKeepProc/procGrassWhistleWaitInit
+// path below (see on_ride_get_off_pre / replace_proc_grass_whistle_wait) rather
+// than being special-cased here: calling fopMsgM_messageSet() directly from this
+// pre-hook, without going through the proc's own setup, silently failed to show
+// any message or play the whistle-blow animation (the message-box process wasn't
+// necessarily in the right state to accept a message outside of its own proc).
 HookAction on_change_item_trigger_keep_proc_pre(ModContext*, void* args, void* retval, void*) {
     auto* player = mods::arg<daAlink_c*>(args, 0);
     const u8 selected_slot = mods::arg<u8>(args, 1);
@@ -719,13 +728,27 @@ HookAction on_change_item_trigger_keep_proc_pre(ModContext*, void* args, void* r
         return HOOK_SKIP_ORIGINAL;
     }
 
-    if (proc_type == ITEM_PROC_GRASS_WHISTLE) {
-        player->mSelectItemId = selected_slot;
-        fopMsgM_messageSet(0x532, 1000);
-        *static_cast<int*>(retval) = 1;
+    return HOOK_CONTINUE;
+}
+
+// commonProcInit() fully overwrites mModeFlg from a static per-proc table, then (near
+// its end) calls rideGetOff() if MODE_RIDING was lost and the player was riding just
+// before the transition. PROC_GRASS_WHISTLE_WAIT's table entry doesn't include
+// MODE_RIDING (it's a ground-only proc in vanilla), so entering it from horseback -
+// via our ITEM_PROC_GRASS_WHISTLE fallback - would otherwise yank Link off Epona
+// before the whistle-blow animation/"Nothing happened..." message can play. Vanilla
+// itself uses this exact re-assert-MODE_RIDING-after-the-fact pattern for PROC_DEAD
+// and PROC_GET_ITEM (see commonProcInit), so doing the same here for the whistle via
+// a rideGetOff() pre-hook follows an existing, tested engine convention rather than
+// inventing new state. The natural follow-up transition to PROC_WAIT once the
+// sequence ends is left alone, so Link still visibly dismounts afterward exactly as
+// vanilla's own dismount animation/logic already handles.
+HookAction on_ride_get_off_pre(ModContext*, void* args, void*, void*) {
+    auto* player = mods::arg<daAlink_c*>(args, 0);
+    if (unrestricted_items_enabled() && player->checkGrassWhistle()) {
+        player->onModeFlg(daAlink_c::MODE_RIDING);
         return HOOK_SKIP_ORIGINAL;
     }
-
     return HOOK_CONTINUE;
 }
 
@@ -979,6 +1002,10 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
     install_hook(
         mods::hook_replace<ProcGrassWhistleWait>(svc_hook, replace_proc_grass_whistle_wait),
         "failed to install ProcGrassWhistleWait");
+
+    install_hook(
+        mods::hook_add_pre<RideGetOff>(svc_hook, on_ride_get_off_pre),
+        "failed to install RideGetOff pre-hook");
 
     install_hook(
         mods::hook_add_pre<SetLight>(svc_hook, on_set_light_pre),
